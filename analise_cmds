@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Definir o diretório para armazenar os logs
+LOG_DIR="/var/log/monitoramento"
+mkdir -p "$LOG_DIR"
+
+# Data e hora atual para nomeação dos arquivos
+NOW=$(date +"%Y%m%d_%H%M%S")
+
+# Função para gerar carga de CPU, memória e I/O usando `stress`
+generate_load_stress() {
+    local duration=$1
+    echo "Gerando carga no sistema com stress por $duration segundos"
+    stress --cpu 4 --io 2 --vm 2 --vm-bytes 128M --timeout "${duration}s" &
+    STRESS_PID=$!
+}
+
+# Função para gerar carga de I/O usando `dd`
+generate_load_dd() {
+    local duration=$1
+    local file="$LOG_DIR/dd_test_$NOW.dat"
+    echo "Gerando carga de I/O usando dd por $duration segundos"
+    dd if=/dev/zero of="$file" bs=1M count=1024 oflag=dsync &
+    DD_PID=$!
+    sleep "$duration"
+    kill -9 $DD_PID
+    wait $DD_PID 2>/dev/null
+}
+
+# Função para gerar carga de I/O usando `fio`
+generate_load_fio() {
+    local duration=$1
+    local file="$LOG_DIR/fio_test_$NOW.fio"
+    echo "Gerando carga de I/O usando fio por $duration segundos"
+    fio --name=mytest --ioengine=sync --rw=randwrite --bs=4k --size=1G --numjobs=4 --time_based --runtime="${duration}s" --output="$file"
+}
+
+# Função para parar a geração de carga do `stress`
+stop_load_stress() {
+    echo "Parando a geração de carga do stress"
+    kill -9 $STRESS_PID
+    wait $STRESS_PID 2>/dev/null
+}
+
+# Função para executar e salvar a saída de `top`
+run_top() {
+    local file="$LOG_DIR/top_$NOW.log"
+    echo "Executando top e salvando saída em $file"
+    top -b -n 1 > "$file"
+}
+
+# Função para executar e salvar a saída de `htop`
+run_htop() {
+    local file="$LOG_DIR/htop_$NOW.log"
+    echo "Executando htop e salvando saída em $file"
+    htop -b -n 1 > "$file" 2>&1
+}
+
+# Função para executar e salvar a saída de `glances`
+run_glances() {
+    local file="$LOG_DIR/glances_$NOW.log"
+    echo "Executando glances e salvando saída em $file"
+    glances -q -t 10 > "$file"
+}
+
+# Função para executar e salvar a saída de `nmon`
+run_nmon() {
+    local file="$LOG_DIR/nmon_$NOW.nmon"
+    echo "Executando nmon e salvando saída em $file"
+    nmon -f -s 10 -c 1 -o "$LOG_DIR/nmon_$NOW" > /dev/null
+}
+
+# Função principal que chama as funções acima
+run_analysis() {
+    local duration=60  # Duração da carga em segundos
+
+    echo "Iniciando análise com carga no sistema por $duration segundos"
+
+    # Escolha o tipo de carga a ser gerada
+    echo "Escolha o tipo de carga: 1) stress 2) dd 3) fio"
+    read -r load_type
+
+    case $load_type in
+        1)
+            generate_load_stress $duration
+            ;;
+        2)
+            generate_load_dd $duration
+            ;;
+        3)
+            generate_load_fio $duration
+            ;;
+        *)
+            echo "Tipo de carga inválido. Usando stress por padrão."
+            generate_load_stress $duration
+            ;;
+    esac
+
+    # Aguarda alguns segundos para a carga estabilizar
+    sleep 10
+
+    run_top
+    run_htop
+    run_glances
+    run_nmon
+
+    # Para a carga se for stress
+    if [ "$load_type" -eq 1 ]; then
+        stop_load_stress
+    fi
+
+    echo "Análise concluída. Os logs estão localizados em $LOG_DIR"
+}
+
+# Executa a análise
+run_analysis
