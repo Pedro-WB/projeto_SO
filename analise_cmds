@@ -21,7 +21,7 @@ capture_nmon() {
 # Função para capturar o monitoramento do comando glances
 capture_glances() {
   echo "Capturando monitoramento do glances..."
-  glances --export csv --export-csv-file glances_capture.csv &
+  glances --stdout cpu,mem,load,process,network,disk > glances.log &
 }
 
 # Função para iniciar o monitoramento simultâneo
