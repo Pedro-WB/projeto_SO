@@ -1,116 +1,133 @@
 #!/bin/bash
 
-# Definir o diretório para armazenar os logs
-LOG_DIR="/var/log/monitoramento"
-mkdir -p "$LOG_DIR"
-
-# Data e hora atual para nomeação dos arquivos
-NOW=$(date +"%Y%m%d_%H%M%S")
-
-# Função para gerar carga de CPU, memória e I/O usando `stress`
-generate_load_stress() {
-    local duration=$1
-    echo "Gerando carga no sistema com stress por $duration segundos"
-    stress --cpu 4 --io 2 --vm 2 --vm-bytes 128M --timeout "${duration}s" &
-    STRESS_PID=$!
+# Função para capturar o monitoramento do comando top
+capture_top() {
+  echo "Capturando monitoramento do top..."
+  top -b -n 60 > top_capture.txt &
 }
 
-# Função para gerar carga de I/O usando `dd`
-generate_load_dd() {
-    local duration=$1
-    local file="$LOG_DIR/dd_test_$NOW.dat"
-    echo "Gerando carga de I/O usando dd por $duration segundos"
-    dd if=/dev/zero of="$file" bs=1M count=1024 oflag=dsync &
-    DD_PID=$!
-    sleep "$duration"
-    kill -9 $DD_PID
-    wait $DD_PID 2>/dev/null
+# Função para capturar o monitoramento do comando htop (necessita rodar como root)
+capture_htop() {
+  echo "Capturando monitoramento do htop..."
+  sudo htop -C > htop_capture.txt &
 }
 
-# Função para gerar carga de I/O usando `fio`
-generate_load_fio() {
-    local duration=$1
-    local file="$LOG_DIR/fio_test_$NOW.fio"
-    echo "Gerando carga de I/O usando fio por $duration segundos"
-    fio --name=mytest --ioengine=sync --rw=randwrite --bs=4k --size=1G --numjobs=4 --time_based --runtime="${duration}s" --output="$file"
+# Função para capturar o monitoramento do comando nmon
+capture_nmon() {
+  echo "Capturando monitoramento do nmon..."
+  nmon -f -s 5 -c 12 -m ./ &
 }
 
-# Função para parar a geração de carga do `stress`
-stop_load_stress() {
-    echo "Parando a geração de carga do stress"
-    kill -9 $STRESS_PID
-    wait $STRESS_PID 2>/dev/null
+# Função para capturar o monitoramento do comando glances
+capture_glances() {
+  echo "Capturando monitoramento do glances..."
+  glances --export csv --export-csv-file glances_capture.csv &
 }
 
-# Função para executar e salvar a saída de `top`
-run_top() {
-    local file="$LOG_DIR/top_$NOW.log"
-    echo "Executando top e salvando saída em $file"
-    top -b -n 1 > "$file"
+# Função para iniciar o monitoramento simultâneo
+start_monitoring() {
+  echo "Iniciando monitoramento..."
+  capture_top
+  capture_htop
+  capture_nmon
+  capture_glances
 }
 
-# Função para executar e salvar a saída de `htop`
-run_htop() {
-    local file="$LOG_DIR/htop_$NOW.log"
-    echo "Executando htop e salvando saída em $file"
-    htop -b -n 1 > "$file" 2>&1
+# Função para gerar carga de CPU com monitoramento
+cpu_stress() {
+  echo "Gerando carga de CPU com stress..."
+  start_monitoring
+  stress --cpu 4 --timeout 60 &
+  wait
+  echo "Carga de CPU e monitoramento concluídos."
 }
 
-# Função para executar e salvar a saída de `glances`
-run_glances() {
-    local file="$LOG_DIR/glances_$NOW.log"
-    echo "Executando glances e salvando saída em $file"
-    glances -q -t 10 > "$file"
+# Função para gerar carga de memória com monitoramento
+memory_stress() {
+  echo "Gerando carga de memória com stress..."
+  start_monitoring
+  stress --vm 2 --vm-bytes 512M --timeout 60 &
+  wait
+  echo "Carga de memória e monitoramento concluídos."
 }
 
-# Função para executar e salvar a saída de `nmon`
-run_nmon() {
-    local file="$LOG_DIR/nmon_$NOW.nmon"
-    echo "Executando nmon e salvando saída em $file"
-    nmon -f -s 10 -c 1 -o "$LOG_DIR/nmon_$NOW" > /dev/null
+# Função para gerar carga de disco com monitoramento
+disk_stress() {
+  echo "Gerando carga de disco com dd..."
+  start_monitoring
+  dd if=/dev/zero of=./stress_test_file bs=1M count=1024 oflag=direct &
+  wait
+  rm -f ./stress_test_file
+  echo "Carga de disco e monitoramento concluídos."
 }
 
-# Função principal que chama as funções acima
-run_analysis() {
-    local duration=60  # Duração da carga em segundos
+# Função para gerar carga de I/O com monitoramento
+io_stress() {
+  echo "Gerando carga de I/O com stress..."
+  start_monitoring
+  stress --io 2 --timeout 60 &
+  wait
+  echo "Carga de I/O e monitoramento concluídos."
+}
 
-    echo "Iniciando análise com carga no sistema por $duration segundos"
+# Função para gerar todas as cargas simultaneamente com monitoramento
+all_stress() {
+  echo "Gerando todas as cargas com monitoramento simultâneo..."
+  start_monitoring
+  stress --cpu 4 --vm 2 --vm-bytes 512M --io 2 --timeout 60 &
+  dd if=/dev/zero of=./stress_test_file bs=1M count=1024 oflag=direct &
+  wait
+  rm -f ./stress_test_file
+  echo "Todas as cargas e monitoramento concluídos."
+}
 
-    # Escolha o tipo de carga a ser gerada
-    echo "Escolha o tipo de carga: 1) stress 2) dd 3) fio"
-    read -r load_type
+# Menu para a interface do usuário
+show_menu() {
+  echo "---------------------------"
+  echo " Menu de Testes de Estresse "
+  echo "---------------------------"
+  echo "1) Gerar carga de CPU com monitoramento"
+  echo "2) Gerar carga de Memória com monitoramento"
+  echo "3) Gerar carga de Disco com monitoramento"
+  echo "4) Gerar carga de I/O com monitoramento"
+  echo "5) Gerar todas as cargas com monitoramento"
+  echo "6) Sair"
+  echo "Escolha uma opção:"
+}
 
-    case $load_type in
-        1)
-            generate_load_stress $duration
-            ;;
-        2)
-            generate_load_dd $duration
-            ;;
-        3)
-            generate_load_fio $duration
-            ;;
-        *)
-            echo "Tipo de carga inválido. Usando stress por padrão."
-            generate_load_stress $duration
-            ;;
+# Função principal para o menu
+main() {
+  while true; do
+    show_menu
+    read -p "Opção: " option
+    case $option in
+      1)
+        cpu_stress
+        ;;
+      2)
+        memory_stress
+        ;;
+      3)
+        disk_stress
+        ;;
+      4)
+        io_stress
+        ;;
+      5)
+        all_stress
+        ;;
+      6)
+        echo "Saindo..."
+        break
+        ;;
+      *)
+        echo "Opção inválida! Tente novamente."
+        ;;
     esac
-
-    # Aguarda alguns segundos para a carga estabilizar
-    sleep 10
-
-    run_top
-    run_htop
-    run_glances
-    run_nmon
-
-    # Para a carga se for stress
-    if [ "$load_type" -eq 1 ]; then
-        stop_load_stress
-    fi
-
-    echo "Análise concluída. Os logs estão localizados em $LOG_DIR"
+    echo "Teste ou captura concluído!"
+    echo
+  done
 }
 
-# Executa a análise
-run_analysis
+# Executa o script principal
+main
